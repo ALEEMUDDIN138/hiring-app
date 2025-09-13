@@ -1,47 +1,112 @@
 pipeline {
     agent any
-
-        environment {
-        IMAGE_TAG = "${BUILD_NUMBER}"
+    tools {
+        maven 'MVN_HOME'
     }
-
+    environment {
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "http"
+        NEXUS_URL = "54.234.57.212:8081"
+        NEXUS_REPOSITORY = "Hiring-app"
+        NEXUS_CREDENTIAL_ID = "Nexus-server"
+        SCANNER_HOME = tool 'sonar_scanner'
+        // Slack details (already configured in Jenkins → Configure System → Slack)
+        SLACK_CHANNEL = "#jenkins-integration"
+    }
     stages {
-        
-       
-        stage('Docker Build') {
+        stage("clone code") {
             steps {
-                sh "docker build . -t sabair0509/hiring-app:$BUILD_NUMBER"
+                git 'https://github.com/ALEEMUDDIN138/hiring-app.git'
             }
         }
-        stage('Docker Push') {
+        stage('Build') {
+    steps {
+        sh 'mvn -Dmaven.test.failure.ignore=true clean install'
+    }
+}
+
+
+        stage("SonarCloud") {
             steps {
-                withCredentials([string(credentialsId: 'docker-hub', variable: 'hubPwd')]) {
-                    sh "docker login -u sabair0509 -p ${hubPwd}"
-                    sh "docker push sabair0509/hiring-app:$BUILD_NUMBER"
+                withSonarQubeEnv('sonarqube_server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=Ncodeit \
+                        -Dsonar.projectName=Ncodeit \
+                        -Dsonar.projectVersion=2.0 \
+                        -Dsonar.sources=/var/lib/jenkins/workspace/$JOB_NAME/src/ \
+                        -Dsonar.binaries=target/classes/com/visualpathit/account/controller/ \
+                        -Dsonar.junit.reportsPath=target/surefire-reports \
+                        -Dsonar.jacoco.reportPath=target/jacoco.exec \
+                        -Dsonar.java.binaries=src/com/room/sample '''
                 }
             }
         }
-        stage('Checkout K8S manifest SCM'){
-            steps {
-              git branch: 'main', url: 'https://github.com/betawins/Hiring-app-argocd.git'
+       stage("publish to nexus") {
+    steps {
+        script {
+            def pom = readMavenPom file: "pom.xml"
+            def filesByGlob = findFiles(glob: "target/*.${pom.packaging}")
+            echo "${filesByGlob[0].name} ${filesByGlob[0].path}"
+            def artifactPath = filesByGlob[0].path
+            def artifactExists = fileExists artifactPath
+
+            if (artifactExists) {
+                nexusArtifactUploader(
+                    nexusVersion: NEXUS_VERSION,
+                    protocol: NEXUS_PROTOCOL,
+                    nexusUrl: NEXUS_URL,
+                    groupId: pom.groupId,
+                    version: pom.version,
+                    repository: NEXUS_REPOSITORY,
+                    credentialsId: NEXUS_CREDENTIAL_ID,
+                    artifacts: [
+                        [artifactId: pom.artifactId, classifier: '', file: artifactPath, type: pom.packaging],
+                        [artifactId: pom.artifactId, classifier: '', file: "pom.xml", type: "pom"]
+                    ]
+                )
+            } else {
+                error "*** File: ${artifactPath}, could not be found"
             }
-        } 
-        stage('Update K8S manifest & push to Repo'){
-            steps {
-                script{
-                   withCredentials([usernamePassword(credentialsId: 'Github_server', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) { 
-                        sh '''
-                        cat /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        sed -i "s/5/${BUILD_NUMBER}/g" /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        cat /var/lib/jenkins/workspace/$JOB_NAME/dev/deployment.yaml
-                        git add .
-                        git commit -m 'Updated the deploy yaml | Jenkins Pipeline'
-                        git remote -v
-                        git push https://$GIT_USERNAME:$GIT_PASSWORD@github.com/betawins/Hiring-app-argocd.git main
-                        '''                        
-                      }
-                  }
-            }   
         }
+    }
+}
+
+   // stage("Deploy to Tomcat") {
+   //     steps {
+  //         withCredentials([usernamePassword(credentialsId: '6032f458-5f14-4354-9500-645db052e2b5', usernameVariable: 'TOMCAT_USER', passwordVariable: 'TOMCAT_PASS')]) {
+  //             script {
+  //                 // Find the WAR file built by Maven
+  //                 def warFile = sh(script: "ls target/*.war | head -n 1", returnStdout: true).trim()
+  //                 def warName = sh(script: "basename ${warFile} .war | tr '[:upper:]' '[:lower:]'", returnStdout: true).trim()
+  //                 echo "Deploying ${warFile} to Tomcat at context path /${warName}..."
+  //                 sh """
+  //                     curl -u $TOMCAT_USER:$TOMCAT_PASS \\
+  //                          -T ${warFile} \\
+  //                          "http://52.207.241.86:8080/manager/text/deploy?path=/${warName}&update=true"
+        stage("Deploy to Tomcat") {
+    steps {
+        withCredentials([usernamePassword(credentialsId: '6032f458-5f14-4354-9500-645db052e2b5', usernameVariable: 'TOMCAT_USER', passwordVariable: 'TOMCAT_PASS')]) {
+            script {
+                // Find the WAR file built by Maven
+                def warFile = sh(script: "ls target/*.war | head -n 1", returnStdout: true).trim()
+                echo "Deploying ${warFile} to Tomcat at context path /Hiring-app ..."
+                sh """
+                    curl -u $TOMCAT_USER:$TOMCAT_PASS \
+                         -T ${warFile} \
+                         "http://52.207.241.86:8080/manager/text/deploy?path=/Hiring-app&update=true"
+                        """
+                    }
+                }
             }
-} 
+        }
+        stage("Slack Notification") {
+            steps {
+                slackSend(
+                    channel: "${SLACK_CHANNEL}",
+                    color: "#36A64F",
+                    message: "Multistage pipeline for *Hiring-App* has been successfully deployed in Tomcat :white_check_mark: by ALEEM for Job: ${env.JOB_NAME} [${env.BUILD_NUMBER}]"
+                )
+            }
+        }
+    }
+}
