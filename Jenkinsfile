@@ -16,7 +16,7 @@ pipeline {
     stages {
         stage("clone code") {
             steps {
-                git 'https://github.com/ALEEMUDDIN138/hiring-app.git'
+                git branch: 'main', url: 'https://github.com/ALEEMUDDIN138/hiring-app.git'
             }
         }
         stage('Build') {
