@@ -6,7 +6,7 @@ pipeline {
     environment {
         NEXUS_VERSION = "nexus3"
         NEXUS_PROTOCOL = "http"
-        NEXUS_URL = "54.234.57.212:8081"
+        NEXUS_URL = "54.86.37.247:8081"
         NEXUS_REPOSITORY = "Hiring-app"
         NEXUS_CREDENTIAL_ID = "Nexus-server"
         SCANNER_HOME = tool 'sonar_scanner'
@@ -93,7 +93,7 @@ pipeline {
                 sh """
                     curl -u $TOMCAT_USER:$TOMCAT_PASS \
                          -T ${warFile} \
-                         "http://52.207.241.86:8080/manager/text/deploy?path=/Hiring-app&update=true"
+                         "http://3.84.151.154:8080/manager/text/deploy?path=/Hiring-app&update=true"
                         """
                     }
                 }
